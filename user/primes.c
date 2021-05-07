@@ -84,6 +84,8 @@ runFilter(int pRead[2], int pWrite[2], int feed)
         }
     }
 
+    free(bufio);
+
     close(pRead[0]);
     close(pWrite[1]);
 }
@@ -95,6 +97,7 @@ main(int argc, char *argv[])
     int pWrite[2], pRead[2], pMain[2];
 
     pipe(pWrite);
+    fprintf(1, "%d %d\n", pWrite[0], pWrite[1]);
     // pMain is the write pipe for main routine
     memcpy(pMain, pWrite, 2);
 
@@ -122,6 +125,7 @@ main(int argc, char *argv[])
         }
     }
 
+    fprintf(1, "%d\n", pMain[1]);
     for(int i = 0; i <= 35; i++) {
         fprintf(pMain[1], "%d\0", i);
     }
