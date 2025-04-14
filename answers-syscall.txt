@@ -1,0 +1,1 @@
+What is the name of the process that was running when the kernel paniced? What is its process id (pid)?
