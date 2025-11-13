@@ -20,6 +20,9 @@ static volatile uint32 *regs;
 
 struct spinlock e1000_lock;
 
+void net_rx(char *buf, int len);
+void* memcpy(void *dst, const void *src, uint n);
+
 // called by pci_init().
 // xregs is the memory address at which the
 // e1000's registers are mapped.
@@ -49,7 +52,7 @@ e1000_init(uint32 *xregs)
     panic("e1000");
   regs[E1000_TDLEN] = sizeof(tx_ring);
   regs[E1000_TDH] = regs[E1000_TDT] = 0;
-  
+
   // [E1000 14.4] Receive initialization
   memset(rx_ring, 0, sizeof(rx_ring));
   for (i = 0; i < RX_RING_SIZE; i++) {
@@ -102,7 +105,36 @@ e1000_transmit(char *buf, int len)
   // a pointer so that it can be freed after send completes.
   //
 
-  
+  acquire(&e1000_lock);
+
+  uint32 curr_h = regs[E1000_TDH];
+  uint32 curr_t = regs[E1000_TDT];
+  uint32 next_t = (curr_t + 1) % TX_RING_SIZE;
+
+  // full
+  if(next_t == curr_h)
+    return -1;
+
+  // free sent data
+  uint32 i = next_t;
+  while (i != curr_h) {
+    if(tx_bufs[i]) {
+      kfree(tx_bufs[i]);
+      tx_bufs[i] = 0;
+    }
+    i = (i + 1) % TX_RING_SIZE;
+  }
+
+  // write ring buf
+  tx_ring[curr_t].addr = (uint64)buf;
+  tx_ring[curr_t].length = len;
+  tx_ring[curr_t].cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS;
+  // stash pointer
+  tx_bufs[curr_t] = buf;
+
+  regs[E1000_TDT] = next_t;
+
+  release(&e1000_lock);
   return 0;
 }
 
@@ -116,6 +148,30 @@ e1000_recv(void)
   // Create and deliver a buf for each packet (using net_rx()).
   //
 
+  char *bufs[RX_RING_SIZE] = {0};
+  int buf_lens[RX_RING_SIZE];
+  uint32 buf_i = 0; // running buf
+
+  acquire(&e1000_lock);
+  uint32 curr_h = regs[E1000_RDH];
+  uint32 curr_t = regs[E1000_RDT];
+  uint32 i = (curr_t + 1) % RX_RING_SIZE;
+  while (i != curr_h) {
+    bufs[buf_i] = kalloc();
+    if (!bufs[buf_i])
+      panic("kalloc");
+
+    memcpy(bufs[buf_i], (const char *)rx_ring[i].addr, rx_ring[i].length);
+    buf_lens[buf_i] = rx_ring[i].length;
+
+    i++; i %= RX_RING_SIZE;
+    buf_i++;
+  }
+  regs[E1000_RDT] = (i - 1) % RX_RING_SIZE;
+  release(&e1000_lock);
+
+  for (uint32 i = 0; i < RX_RING_SIZE && bufs[i]; i++)
+    net_rx(bufs[i], buf_lens[i]);
 }
 
 void

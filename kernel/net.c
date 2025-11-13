@@ -19,12 +19,75 @@ static uint8 host_mac[ETHADDR_LEN] = { 0x52, 0x55, 0x0a, 0x00, 0x02, 0x02 };
 
 static struct spinlock netlock;
 
+struct message {
+  char *payload;
+  uint32 size;
+};
+
+#define MESSAGE_QUEUE_BUF_LEN 16
+#define MESSAGE_QUEUE_BUF_SIZE (MESSAGE_QUEUE_BUF_LEN+1)
+
+struct message_queue {
+  uint8 used;
+  uint8 head;
+  uint8 tail;
+  struct spinlock lock;
+  struct message buf[MESSAGE_QUEUE_BUF_SIZE];
+};
+
+void
+message_queue_init(struct message_queue *q)
+{
+  q->used = q->head = q->tail = 0;
+  initlock(&q->lock, "mqlock");
+}
+
+void
+message_enque(struct message_queue *q, struct message m)
+{
+  uint8 next = (q->tail + 1) % MESSAGE_QUEUE_BUF_SIZE;
+  if (next == q->head) return; // buf full, throw
+  q->buf[q->tail] = m;
+  q->tail = next;
+}
+
+int
+message_deque(struct message_queue *q, struct message *m)
+{
+  if (q->head == q->tail) return -1;
+  *m = q->buf[q->head];
+  q->head = (q->head + 1) % MESSAGE_QUEUE_BUF_SIZE;
+  return 0;
+}
+
+#define PORT_MIN 2000
+#define PORT_MAX 2100
+#define NETMESSAGES_SIZE (PORT_MAX-PORT_MIN)
+
+struct message_queue net_message_box[NETMESSAGES_SIZE];
+
+void
+init_net_message_box()
+{
+  for (uint32 i = 0; i < NETMESSAGES_SIZE; ++i)
+    message_queue_init(&net_message_box[i]);
+}
+
+struct message_queue *
+net_port_message_queue(int port)
+{
+  if (port < PORT_MIN || port >= PORT_MAX)
+    return 0;
+
+  return &net_message_box[port-PORT_MIN];
+}
+
 void
 netinit(void)
 {
   initlock(&netlock, "netlock");
+  init_net_message_box();
 }
-
 
 //
 // bind(int port)
@@ -38,7 +101,17 @@ sys_bind(void)
   // Your code here.
   //
 
-  return -1;
+  int port;
+  argint(0, &port);
+
+  struct message_queue *q = net_port_message_queue(port);
+  if (!q) return -1;
+
+  acquire(&q->lock);
+  q->used = 1;
+  release(&q->lock);
+
+  return 0;
 }
 
 //
@@ -77,7 +150,42 @@ sys_recv(void)
   //
   // Your code here.
   //
-  return -1;
+
+  int dport;    argint(0, &dport);
+  uint64 src;   argaddr(1, &src);
+  uint64 sport; argaddr(2, &sport);
+  uint64 buf;   argaddr(3, &buf);
+  int maxlen;   argint(4, &maxlen);
+
+  struct message_queue *q = net_port_message_queue(dport);
+  struct message m;
+  acquire(&q->lock);
+  while (message_deque(q, &m) < 0) {
+    sleep(q, &q->lock);
+  }
+  release(&q->lock);
+
+  struct eth *eth = (struct eth *) m.payload;
+  struct ip *ip = (struct ip *) (eth + 1);
+  struct udp *udp = (struct udp *) (ip + 1);
+
+  struct proc *p = myproc();
+
+  int k_src = ntohl(ip->ip_src);
+  if (copyout(p->pagetable, src, (char *)(&k_src), sizeof(k_src)) < 0)
+    return -1;
+
+  short k_sport = ntohs(udp->sport);
+  if (copyout(p->pagetable, sport, (char *)(&k_sport), sizeof(k_sport)) < 0)
+    return -1;
+
+  char *data = (char *)(udp + 1);
+  short datalen = ntohs(udp->ulen) - sizeof(struct udp);
+  int len = maxlen < datalen ? maxlen : datalen;
+  if (copyout(p->pagetable, buf, data, len) < 0)
+    return -1;
+
+  return len;
 }
 
 // This code is lifted from FreeBSD's ping.c, and is copyright by the Regents
@@ -174,7 +282,10 @@ sys_send(void)
     return -1;
   }
 
-  e1000_transmit(buf, total);
+  if(e1000_transmit(buf, total) < 0) {
+    kfree(buf);
+    return -1;
+  }
 
   return 0;
 }
@@ -191,7 +302,21 @@ ip_rx(char *buf, int len)
   //
   // Your code here.
   //
-  
+
+  struct eth *eth = (struct eth *) buf;
+  struct ip *ip = (struct ip *) (eth + 1);
+  struct udp *udp = (struct udp *) (ip + 1);
+
+  uint16 dport = ntohs(udp->dport);
+  struct message_queue *q = net_port_message_queue(dport);
+  if (!q) return;
+
+  struct message m = {
+    .payload = buf,
+    .size = len,
+  };
+  message_enque(q, m);
+  wakeup(q);
 }
 
 //
@@ -219,7 +344,7 @@ arp_rx(char *inbuf)
   char *buf = kalloc();
   if(buf == 0)
     panic("send_arp_reply");
-  
+
   struct eth *eth = (struct eth *) buf;
   memmove(eth->dhost, ineth->shost, ETHADDR_LEN); // ethernet destination = query source
   memmove(eth->shost, local_mac, ETHADDR_LEN); // ethernet source = xv6's ethernet address
@@ -248,10 +373,10 @@ net_rx(char *buf, int len)
   struct eth *eth = (struct eth *) buf;
 
   if(len >= sizeof(struct eth) + sizeof(struct arp) &&
-     ntohs(eth->type) == ETHTYPE_ARP){
+    ntohs(eth->type) == ETHTYPE_ARP){
     arp_rx(buf);
   } else if(len >= sizeof(struct eth) + sizeof(struct ip) &&
-     ntohs(eth->type) == ETHTYPE_IP){
+    ntohs(eth->type) == ETHTYPE_IP){
     ip_rx(buf, len);
   } else {
     kfree(buf);
