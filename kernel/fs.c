@@ -24,7 +24,7 @@
 #define min(a, b) ((a) < (b) ? (a) : (b))
 // there should be one superblock per disk device, but we run with
 // only one device
-struct superblock sb; 
+struct superblock sb;
 
 // Read the super block.
 static void
@@ -182,7 +182,7 @@ void
 iinit()
 {
   int i = 0;
-  
+
   initlock(&itable.lock, "itable");
   for(i = 0; i < NINODE; i++) {
     initsleeplock(&itable.inode[i].lock, "inode");
@@ -416,6 +416,46 @@ bmap(struct inode *ip, uint bn)
     brelse(bp);
     return addr;
   }
+  bn -= NINDIRECT;
+
+  if(bn < NINDIRECT2){
+    uint bn1 = bn / NINDIRECT;
+    uint bn2 = bn % NINDIRECT;
+
+    // load or alloc double-indirect block
+    if((addr = ip->addrs[NDIRECT+1]) == 0){
+      addr = balloc(ip->dev);
+      if(addr == 0)
+        return 0;
+      ip->addrs[NDIRECT+1] = addr;
+    }
+
+    // read indirect 1
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    if((addr = a[bn1]) == 0){
+      addr = balloc(ip->dev);
+      if(addr){
+        a[bn1] = addr;
+        log_write(bp);
+      }
+    }
+    brelse(bp);
+
+    // read indirect 2
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    if((addr = a[bn2]) == 0){
+      addr = balloc(ip->dev);
+      if(addr){
+        a[bn2] = addr;
+        log_write(bp);
+      }
+    }
+    brelse(bp);
+
+    return addr;
+  }
 
   panic("bmap: out of range");
 }
@@ -447,6 +487,35 @@ itrunc(struct inode *ip)
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
   }
+
+  if(ip->addrs[NDIRECT+1]){
+    ip->addrs[NDIRECT+1] = 0;
+  }
+
+  /* if(ip->addrs[NDIRECT+1]){ */
+  /*   bp = bread(ip->dev, ip->addrs[NDIRECT+1]); */
+  /*   a = (uint*)bp->data; */
+  /*   for(i = 0; i < NINDIRECT; i++){ */
+  /*     if(a[i]){ */
+  /*       bp2 = bread(ip->dev, a[i]); */
+  /*       a2 = (uint*)bp2->data; */
+  /*       for(j = 0; j < NINDIRECT; j++){ */
+  /*         if(a2[j]) */
+  /*           bfree(ip->dev, a2[j]); */
+  /*       } */
+  /*     } */
+  /*   } */
+
+  /*   bp = bread(ip->dev, ip->addrs[NDIRECT]); */
+  /*   a = (uint*)bp->data; */
+  /*   for(j = 0; j < NINDIRECT; j++){ */
+  /*     if(a[j]) */
+  /*       bfree(ip->dev, a[j]); */
+  /*   } */
+  /*   brelse(bp); */
+  /*   bfree(ip->dev, ip->addrs[NDIRECT]); */
+  /*   ip->addrs[NDIRECT] = 0; */
+  /* } */
 
   ip->size = 0;
   iupdate(ip);
@@ -694,4 +763,39 @@ struct inode*
 nameiparent(char *path, char *name)
 {
   return namex(path, 1, name);
+}
+
+struct inode*
+follown(struct inode *ip, uint depth)
+{
+  char target[MAXPATH];
+
+  if(ip->type != T_SYMLINK)
+    return ip;
+
+  if(depth > 10){
+    iunlockput(ip);
+    return 0;
+  }
+
+  if(readi(ip, 0, (uint64)target, 0, ip->size) != ip->size){
+    iunlockput(ip);
+    return 0;
+  }
+  target[ip->size] = '\0';
+  iunlockput(ip);
+
+  ip = namei(target);
+  if(ip == 0){
+    return 0;
+  }
+
+  ilock(ip);
+  return follown(ip, depth+1);
+}
+
+struct inode*
+follow(struct inode *ip)
+{
+  return follown(ip, 0);
 }
