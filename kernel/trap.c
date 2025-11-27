@@ -65,6 +65,13 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if(r_scause() == 0xd){
+    // do mmap
+    printf("mmap sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
+    uint64 va = r_stval();
+    intr_on();
+    filemmap(va);
+
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {

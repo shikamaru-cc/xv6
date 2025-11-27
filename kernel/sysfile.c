@@ -507,11 +507,63 @@ sys_pipe(void)
 uint64
 sys_mmap(void)
 {
+  size_t len;
+  int fd, i;
+  uint64 a;
+  struct file *f;
+  struct proc *p = myproc();
+
+  argsize(1, &len);
+  if(argfd(4, &fd, &f) < 0)
+    return -1;
+
+  for(i = 0; i < NMAP; i++){
+    if(p->mmapped[i].va == 0)
+      goto found;
+  }
   return -1;
+
+found:
+  a = i > 0 ? p->mmapped[i-1].va : (uint64)p->trapframe;
+  a = PGROUNDDOWN(a-len);
+
+  p->mmapped[i].va = a;
+  p->mmapped[i].len = len;
+  p->mmapped[i].f = f;
+
+  filedup(f);
+
+  return a;
 }
 
 uint64
 sys_munmap(void)
 {
+  int i;
+  uint64 a, va;
+  pte_t *pte;
+
+  argaddr(0, &va);
+
+  struct proc *p = myproc();
+  for(i = 0; i < NMAP; i++){
+    if(p->mmapped[i].va == va)
+      goto found;
+  }
   return -1;
+
+found:
+  for(a = va; a < PGROUNDUP(va + p->mmapped[i].len); a += PGSIZE){
+    if((pte = walk(p->pagetable, a, 0)))
+      uvmunmap(p->pagetable, a, 1, 1);
+  }
+
+  fileclose(p->mmapped[i].f);
+
+  for(; i < NMAP-1; i++){
+    p->mmapped[i] = p->mmapped[i+1];
+  }
+  p->mmapped[NMAP-1].va = 0;
+
+  return 0;
 }

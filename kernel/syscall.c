@@ -59,6 +59,12 @@ argint(int n, int *ip)
   *ip = argraw(n);
 }
 
+void
+argsize(int n, size_t *p)
+{
+  *p = argraw(n);
+}
+
 // Retrieve an argument as a pointer.
 // Doesn't check for legality, since
 // copyin/copyout will do that.

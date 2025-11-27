@@ -180,3 +180,50 @@ filewrite(struct file *f, uint64 addr, int n)
   return ret;
 }
 
+int
+filemmap(uint64 va)
+{
+  struct proc *p;
+  struct file *f;
+  int i;
+  char *mem;
+  uint64 a, off;
+
+  a = PGROUNDDOWN(va);
+  p = myproc();
+
+  if(a >= (uint64)p->trapframe){
+    printf("do_mmap: a >= trapframe\n");
+    return -1;
+  }
+
+  // find map record
+  for(i = 0; i < MMAPMAX; i++){
+    if(p->mmapped[i].va == 0)
+      return -1;
+    if(a >= p->mmapped[i].va)
+      goto found;
+  }
+  return -1;
+
+found:
+  mem = kalloc();
+  if(mem == 0)
+    return -1;
+
+  memset(mem, 0, PGSIZE);
+
+  if(mappages(p->pagetable, a, PGSIZE, (uint64)mem, PTE_R|PTE_U|PTE_W) != 0){
+    kfree(mem);
+    return -1;
+  }
+
+  off = a - p->mmapped[i].va;
+  f = p->mmapped[i].f;
+  ilock(f->ip);
+  readi(f->ip, 1, a, (uint)off, PGSIZE);
+  iunlock(f->ip);
+
+  return 0;
+}
+

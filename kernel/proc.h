@@ -79,6 +79,15 @@ struct trapframe {
   /* 280 */ uint64 t6;
 };
 
+struct mmapped {
+  uint64 va;
+  uint64 len;
+  struct file *f;
+};
+
+#define NMAP 16
+#define MMAPMAX 16
+
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // Per-process state
@@ -103,5 +112,6 @@ struct proc {
   struct context context;      // swtch() here to run process
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
+  struct mmapped mmapped[NMAP];// mmap record
   char name[16];               // Process name (debugging)
 };
