@@ -508,13 +508,18 @@ uint64
 sys_mmap(void)
 {
   size_t len;
-  int fd, i;
+  int fd, i, prot, flags;
   uint64 a;
   struct file *f;
   struct proc *p = myproc();
 
   argsize(1, &len);
+  argint(2, &prot);
+  argint(3, &flags);
   if(argfd(4, &fd, &f) < 0)
+    return -1;
+
+  if(prot & PROT_WRITE && flags & MAP_SHARED && !f->writable)
     return -1;
 
   for(i = 0; i < NMAP; i++){
@@ -554,7 +559,8 @@ sys_munmap(void)
 
 found:
   for(a = va; a < PGROUNDUP(va + p->mmapped[i].len); a += PGSIZE){
-    if((pte = walk(p->pagetable, a, 0)))
+    pte = walk(p->pagetable, a, 0);
+    if(pte && *pte & PTE_V)
       uvmunmap(p->pagetable, a, 1, 1);
   }
 
