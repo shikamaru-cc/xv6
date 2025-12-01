@@ -523,18 +523,18 @@ sys_mmap(void)
     return -1;
 
   for(i = 0; i < NMAP; i++){
-    if(p->mmapped[i].va == 0)
+    if(p->mm[i].va == 0)
       goto found;
   }
   return -1;
 
 found:
-  a = i > 0 ? p->mmapped[i-1].va : (uint64)p->trapframe;
+  a = i > 0 ? p->mm[i-1].va : (uint64)p->trapframe;
   a = PGROUNDDOWN(a-len);
 
-  p->mmapped[i].va = a;
-  p->mmapped[i].len = len;
-  p->mmapped[i].f = f;
+  p->mm[i].va = a;
+  p->mm[i].len = len;
+  p->mm[i].f = f;
 
   filedup(f);
 
@@ -552,24 +552,24 @@ sys_munmap(void)
 
   struct proc *p = myproc();
   for(i = 0; i < NMAP; i++){
-    if(p->mmapped[i].va == va)
+    if(p->mm[i].va == va)
       goto found;
   }
   return -1;
 
 found:
-  for(a = va; a < PGROUNDUP(va + p->mmapped[i].len); a += PGSIZE){
+  for(a = va; a < PGROUNDUP(va + p->mm[i].len); a += PGSIZE){
     pte = walk(p->pagetable, a, 0);
     if(pte && *pte & PTE_V)
       uvmunmap(p->pagetable, a, 1, 1);
   }
 
-  fileclose(p->mmapped[i].f);
+  fileclose(p->mm[i].f);
 
   for(; i < NMAP-1; i++){
-    p->mmapped[i] = p->mmapped[i+1];
+    p->mm[i] = p->mm[i+1];
   }
-  p->mmapped[NMAP-1].va = 0;
+  p->mm[NMAP-1].va = 0;
 
   return 0;
 }

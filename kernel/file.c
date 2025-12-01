@@ -198,10 +198,10 @@ filemmap(uint64 va)
   }
 
   // find map record
-  for(i = 0; i < MMAPMAX; i++){
-    if(p->mmapped[i].va == 0)
+  for(i = 0; i < NMAP; i++){
+    if(p->mm[i].va == 0)
       return -1;
-    if(a >= p->mmapped[i].va)
+    if(a >= p->mm[i].va)
       goto found;
   }
   return -1;
@@ -218,8 +218,8 @@ found:
     return -1;
   }
 
-  off = a - p->mmapped[i].va;
-  f = p->mmapped[i].f;
+  off = a - p->mm[i].va;
+  f = p->mm[i].f;
   ilock(f->ip);
   readi(f->ip, 1, a, (uint)off, PGSIZE);
   iunlock(f->ip);
