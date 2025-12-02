@@ -13,6 +13,7 @@
 #include "stat.h"
 #include "proc.h"
 #include "fcntl.h"
+#include "memlayout.h"
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
@@ -200,7 +201,7 @@ filemmap(struct file *f, uint64 len, int prot, int flags)
   return -1;
 
 found:
-  a = i > 0 ? p->mm[i-1].va : (uint64)p->trapframe;
+  a = i > 0 ? p->mm[i-1].va : TRAPFRAME;
   a = PGROUNDDOWN(a-len);
 
   p->mm[i].va = a;
@@ -227,8 +228,8 @@ filemmapa(uint64 va)
   a = PGROUNDDOWN(va);
   p = myproc();
 
-  if(a >= (uint64)p->trapframe){
-    printf("do_mmap: a >= trapframe\n");
+  if(a >= TRAPFRAME){
+    printf("filemmapa: a >= TRAPFRAME\n");
     return -1;
   }
 
