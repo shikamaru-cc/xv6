@@ -16,6 +16,8 @@
 #include "file.h"
 #include "fcntl.h"
 
+#define min(a, b) ((a) < (b) ? (a) : (b))
+
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
 static int
@@ -534,6 +536,8 @@ found:
 
   p->mm[i].va = a;
   p->mm[i].len = len;
+  p->mm[i].prot = prot;
+  p->mm[i].flags = flags;
   p->mm[i].f = f;
 
   filedup(f);
@@ -545,8 +549,10 @@ uint64
 sys_munmap(void)
 {
   int i;
+  uint n, lasta;
   uint64 a, va;
   pte_t *pte;
+  struct file *f;
 
   argaddr(0, &va);
 
@@ -558,13 +564,27 @@ sys_munmap(void)
   return -1;
 
 found:
-  for(a = va; a < PGROUNDUP(va + p->mm[i].len); a += PGSIZE){
+  f = p->mm[i].f;
+  ilock(f->ip);
+  lasta = va + min(p->mm[i].len, f->ip->size);
+  iunlock(f->ip);
+  for(a = va; a < PGROUNDUP(lasta); a += PGSIZE){
     pte = walk(p->pagetable, a, 0);
-    if(pte && *pte & PTE_V)
-      uvmunmap(p->pagetable, a, 1, 1);
+    if(!pte || !(*pte & PTE_V))
+      continue;
+
+    if(p->mm[i].flags & MAP_SHARED){
+      n = a < PGROUNDDOWN(lasta) ? PGSIZE : lasta - a;
+      begin_op();
+      ilock(f->ip);
+      writei(f->ip, 1, a, a-va, n);
+      iunlock(f->ip);
+      end_op();
+    }
+    uvmunmap(p->pagetable, a, 1, 1);
   }
 
-  fileclose(p->mm[i].f);
+  fileclose(f);
 
   for(; i < NMAP-1; i++){
     p->mm[i] = p->mm[i+1];

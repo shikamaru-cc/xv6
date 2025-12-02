@@ -67,7 +67,7 @@ usertrap(void)
     syscall();
   } else if(r_scause() == 0xd){
     // do mmap
-    printf("mmap sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
+    // printf("mmap sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
     uint64 va = r_stval();
     intr_on();
     filemmap(va);
