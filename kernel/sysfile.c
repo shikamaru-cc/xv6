@@ -538,6 +538,7 @@ found:
   p->mm[i].len = len;
   p->mm[i].prot = prot;
   p->mm[i].flags = flags;
+  p->mm[i].off = 0;
   p->mm[i].f = f;
 
   filedup(f);
@@ -549,12 +550,14 @@ uint64
 sys_munmap(void)
 {
   int i;
-  uint n, lasta;
-  uint64 a, va;
+  size_t len;
+  uint n;
+  uint64 a, va, nexta, off;
   pte_t *pte;
   struct file *f;
 
   argaddr(0, &va);
+  argsize(1, &len);
 
   struct proc *p = myproc();
   for(i = 0; i < NMAP; i++){
@@ -565,31 +568,39 @@ sys_munmap(void)
 
 found:
   f = p->mm[i].f;
+
   ilock(f->ip);
-  lasta = va + min(p->mm[i].len, f->ip->size);
+  nexta = PGROUNDUP(va + min(len, p->mm[i].len));
   iunlock(f->ip);
-  for(a = va; a < PGROUNDUP(lasta); a += PGSIZE){
+
+  for(a = va; a < nexta; a += PGSIZE){
     pte = walk(p->pagetable, a, 0);
     if(!pte || !(*pte & PTE_V))
       continue;
 
     if(p->mm[i].flags & MAP_SHARED){
-      n = a < PGROUNDDOWN(lasta) ? PGSIZE : lasta - a;
       begin_op();
       ilock(f->ip);
-      writei(f->ip, 1, a, a-va, n);
+      off = a - va + p->mm[i].off;
+      n = min(PGSIZE, f->ip->size - off);
+      writei(f->ip, 1, a, off, n);
       iunlock(f->ip);
       end_op();
     }
     uvmunmap(p->pagetable, a, 1, 1);
   }
 
-  fileclose(f);
-
-  for(; i < NMAP-1; i++){
-    p->mm[i] = p->mm[i+1];
+  if(nexta >= PGROUNDUP(va + p->mm[i].len)){
+    for(; i < NMAP-1; i++){
+      p->mm[i] = p->mm[i+1];
+    }
+    p->mm[NMAP-1].va = 0;
+    fileclose(f);
+  } else {
+    p->mm[i].va = nexta;
+    p->mm[i].len -= nexta - va;
+    p->mm[i].off += nexta - va;
   }
-  p->mm[NMAP-1].va = 0;
 
   return 0;
 }

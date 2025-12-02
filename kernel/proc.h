@@ -82,6 +82,7 @@ struct trapframe {
 struct mm {
   uint64 va;
   uint64 len;
+  uint64 off;
   int prot;
   int flags;
   struct file *f;

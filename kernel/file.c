@@ -218,7 +218,7 @@ found:
     return -1;
   }
 
-  off = a - p->mm[i].va;
+  off = a - p->mm[i].va + p->mm[i].off;
   f = p->mm[i].f;
   ilock(f->ip);
   readi(f->ip, 1, a, (uint)off, PGSIZE);
