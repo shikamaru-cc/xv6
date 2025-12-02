@@ -16,8 +16,6 @@
 #include "file.h"
 #include "fcntl.h"
 
-#define min(a, b) ((a) < (b) ? (a) : (b))
-
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
 static int
@@ -510,10 +508,8 @@ uint64
 sys_mmap(void)
 {
   size_t len;
-  int fd, i, prot, flags;
-  uint64 a;
+  int fd, prot, flags;
   struct file *f;
-  struct proc *p = myproc();
 
   argsize(1, &len);
   argint(2, &prot);
@@ -521,86 +517,15 @@ sys_mmap(void)
   if(argfd(4, &fd, &f) < 0)
     return -1;
 
-  if(prot & PROT_WRITE && flags & MAP_SHARED && !f->writable)
-    return -1;
-
-  for(i = 0; i < NMAP; i++){
-    if(p->mm[i].va == 0)
-      goto found;
-  }
-  return -1;
-
-found:
-  a = i > 0 ? p->mm[i-1].va : (uint64)p->trapframe;
-  a = PGROUNDDOWN(a-len);
-
-  p->mm[i].va = a;
-  p->mm[i].len = len;
-  p->mm[i].prot = prot;
-  p->mm[i].flags = flags;
-  p->mm[i].off = 0;
-  p->mm[i].f = f;
-
-  filedup(f);
-
-  return a;
+  return filemmap(f, len, prot, flags);
 }
 
 uint64
 sys_munmap(void)
 {
-  int i;
+  uint64 va;
   size_t len;
-  uint n;
-  uint64 a, va, nexta, off;
-  pte_t *pte;
-  struct file *f;
-
   argaddr(0, &va);
   argsize(1, &len);
-
-  struct proc *p = myproc();
-  for(i = 0; i < NMAP; i++){
-    if(p->mm[i].va == va)
-      goto found;
-  }
-  return -1;
-
-found:
-  f = p->mm[i].f;
-
-  ilock(f->ip);
-  nexta = PGROUNDUP(va + min(len, p->mm[i].len));
-  iunlock(f->ip);
-
-  for(a = va; a < nexta; a += PGSIZE){
-    pte = walk(p->pagetable, a, 0);
-    if(!pte || !(*pte & PTE_V))
-      continue;
-
-    if(p->mm[i].flags & MAP_SHARED){
-      begin_op();
-      ilock(f->ip);
-      off = a - va + p->mm[i].off;
-      n = min(PGSIZE, f->ip->size - off);
-      writei(f->ip, 1, a, off, n);
-      iunlock(f->ip);
-      end_op();
-    }
-    uvmunmap(p->pagetable, a, 1, 1);
-  }
-
-  if(nexta >= PGROUNDUP(va + p->mm[i].len)){
-    for(; i < NMAP-1; i++){
-      p->mm[i] = p->mm[i+1];
-    }
-    p->mm[NMAP-1].va = 0;
-    fileclose(f);
-  } else {
-    p->mm[i].va = nexta;
-    p->mm[i].len -= nexta - va;
-    p->mm[i].off += nexta - va;
-  }
-
-  return 0;
+  return fileunmap(va, len);
 }

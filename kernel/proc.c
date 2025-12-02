@@ -353,6 +353,13 @@ exit(int status)
   if(p == initproc)
     panic("init exiting");
 
+  // Do munmap
+  for(int i = 0; i < NMAP; i++){
+    if(p->mm[i].va){
+      fileunmap(p->mm[i].va, p->mm[i].len);
+    }
+  }
+
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){
     if(p->ofile[fd]){
@@ -374,7 +381,7 @@ exit(int status)
 
   // Parent might be sleeping in wait().
   wakeup(p->parent);
-  
+
   acquire(&p->lock);
 
   p->xstate = status;

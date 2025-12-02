@@ -70,8 +70,10 @@ usertrap(void)
     // printf("mmap sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
     uint64 va = r_stval();
     intr_on();
-    filemmap(va);
-
+    if(filemmapa(va) < 0){
+      printf("filemmapa fail\n");
+      setkilled(p);
+    }
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
