@@ -362,11 +362,8 @@ exit(int status)
     panic("init exiting");
 
   // Do munmap
-  for(int i = 0; i < NMAP; i++){
-    if(p->mm[i].va){
-      fileunmap(p->mm[i].va, p->mm[i].len);
-    }
-  }
+  while(p->mm[0].va)
+    fileunmap(p->mm[0].va, p->mm[0].len);
 
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){
