@@ -217,11 +217,11 @@ found:
 }
 
 int
-filemmapa(uint64 va)
+filemmapa(uint64 va, int write)
 {
   struct proc *p;
   struct file *f;
-  int i;
+  int i, perm;
   char *mem;
   uint64 a, off;
 
@@ -243,13 +243,24 @@ filemmapa(uint64 va)
   return -1;
 
 found:
+  if(write & !(p->mm[i].prot & PROT_WRITE))
+    return -1;
+  if(!write & !(p->mm[i].prot & PROT_READ))
+    return -1;
+
   mem = kalloc();
   if(mem == 0)
     return -1;
 
   memset(mem, 0, PGSIZE);
 
-  if(mappages(p->pagetable, a, PGSIZE, (uint64)mem, PTE_R|PTE_U|PTE_W) != 0){
+  perm = PTE_U;
+  if(p->mm[i].prot & PROT_READ)
+    perm |= PTE_R;
+  if(p->mm[i].prot & PROT_WRITE)
+    perm |= PTE_W;
+
+  if(mappages(p->pagetable, a, PGSIZE, (uint64)mem, perm) != 0){
     kfree(mem);
     return -1;
   }
@@ -257,7 +268,7 @@ found:
   off = a - p->mm[i].va + p->mm[i].off;
   f = p->mm[i].f;
   ilock(f->ip);
-  readi(f->ip, 1, a, (uint)off, PGSIZE);
+  readi(f->ip, 0, (uint64)mem, (uint)off, PGSIZE);
   iunlock(f->ip);
 
   return 0;
@@ -271,30 +282,39 @@ fileunmap(uint64 va, uint64 len)
   uint64 a, nexta, off;
   pte_t *pte;
   struct file *f;
-
+  struct mm *mm;
   struct proc *p = myproc();
+
+  if((va % PGSIZE) != 0)
+    return -1;
+
   for(i = 0; i < NMAP; i++){
-    if(p->mm[i].va == va)
+    mm = p->mm + i;
+    if(mm->va && va >= mm_beg(mm) && va < mm_end(mm))
       goto found;
   }
   return -1;
 
 found:
-  f = p->mm[i].f;
+  f = mm->f;
 
   ilock(f->ip);
-  nexta = PGROUNDUP(va + min(len, p->mm[i].len));
+  nexta = PGROUNDUP(min(va + len, mm_end(mm)));
   iunlock(f->ip);
+
+  if(va > mm_beg(mm) && nexta < mm_end(mm))
+    // reject mm gap
+    return -1;
 
   for(a = va; a < nexta; a += PGSIZE){
     pte = walk(p->pagetable, a, 0);
     if(!pte || !(*pte & PTE_V))
       continue;
 
-    if(p->mm[i].flags & MAP_SHARED){
+    if(mm->flags & MAP_SHARED){
       begin_op();
       ilock(f->ip);
-      off = a - va + p->mm[i].off;
+      off = a - mm_beg(mm) + mm->off;
       n = min(PGSIZE, f->ip->size - off);
       writei(f->ip, 1, a, off, n);
       iunlock(f->ip);
@@ -303,16 +323,22 @@ found:
     uvmunmap(p->pagetable, a, 1, 1);
   }
 
-  if(nexta >= PGROUNDUP(va + p->mm[i].len)){
+  if(va == mm_beg(mm)){
+    mm->va = nexta;
+    mm->len -= nexta - va;
+    mm->off += nexta - va;
+  } else {
+    // unmap in middle
+    mm->len = va - mm->va;
+  }
+
+  // all unmap, remove mm
+  if(mm->len == 0){
     for(; i < NMAP-1; i++){
       p->mm[i] = p->mm[i+1];
     }
     p->mm[NMAP-1].va = 0;
     fileclose(f);
-  } else {
-    p->mm[i].va = nexta;
-    p->mm[i].len -= nexta - va;
-    p->mm[i].off += nexta - va;
   }
 
   return 0;

@@ -89,6 +89,8 @@ struct mm {
 };
 
 #define NMAP 16
+#define mm_beg(mm) ((mm)->va)
+#define mm_end(mm) ((mm)->va + (mm)->len)
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 

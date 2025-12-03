@@ -38,7 +38,7 @@ int             fileread(struct file*, uint64, int n);
 int             filestat(struct file*, uint64 addr);
 int             filewrite(struct file*, uint64, int n);
 uint64          filemmap(struct file *f, uint64 len, int prot, int flags);
-int             filemmapa(uint64);
+int             filemmapa(uint64 va, int write);
 int             fileunmap(uint64 va, uint64 len);
 
 // fs.c

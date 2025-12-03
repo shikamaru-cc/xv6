@@ -46,10 +46,10 @@ usertrap(void)
   w_stvec((uint64)kernelvec);
 
   struct proc *p = myproc();
-  
+
   // save user program counter.
   p->trapframe->epc = r_sepc();
-  
+
   if(r_scause() == 8){
     // system call
 
@@ -70,10 +70,15 @@ usertrap(void)
     // printf("mmap sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
     uint64 va = r_stval();
     intr_on();
-    if(filemmapa(va) < 0){
-      printf("filemmapa fail\n");
+    if(filemmapa(va, 0) < 0)
       setkilled(p);
-    }
+  } else if(r_scause() == 0xf){
+    // do mmap
+    // printf("mmap sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
+    uint64 va = r_stval();
+    intr_on();
+    if(filemmapa(va, 1) < 0)
+      setkilled(p);
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
